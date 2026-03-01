@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Weer</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#F5F3EE">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Weer">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F5F3EE;
+    --fg: #1A1A18;
+    --muted: #9A9892;
+    --accent: #2D5BE3;
+    --card: #ECEAE4;
+    --border: #E0DDD6;
+    --white: #FFFFFF;
+  }
+
+  html, body {
+    height: 100%;
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    overscroll-behavior: none;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100dvh;
+    position: relative;
+  }
+
+  /* Safe area for notch / home indicator */
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: env(safe-area-inset-top, 14px) 28px 0;
+    padding-top: max(env(safe-area-inset-top), 14px);
+    font-size: 12px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .scroll-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px;
+    padding-bottom: max(env(safe-area-inset-bottom), 32px);
+    scrollbar-width: none;
+  }
+  .scroll-content::-webkit-scrollbar { display: none; }
+
+  /* Search overlay */
+  .search-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 200;
+    padding: max(env(safe-area-inset-top), 20px) 20px 20px;
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .search-overlay.open { display: flex; }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border-radius: 14px;
+    padding: 12px 16px;
+  }
+  .search-bar input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    color: var(--fg);
+    outline: none;
+  }
+  .search-bar input::placeholder { color: var(--muted); }
+  .search-close {
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 13px; font-family: 'DM Sans', sans-serif;
+    padding: 4px 8px; flex-shrink: 0;
+  }
+  .search-results { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+  .search-result-item {
+    padding: 14px 16px; background: var(--card); border-radius: 12px;
+    cursor: pointer; font-size: 14px; transition: background 0.15s;
+  }
+  .search-result-item:hover, .search-result-item:active { background: var(--border); }
+  .search-result-city { font-weight: 500; }
+  .search-result-country { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .search-hint { font-size: 13px; color: var(--muted); text-align: center; margin-top: 12px; }
+
+  /* Header */
+  .header {
+    padding-top: 16px; padding-bottom: 4px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .location-wrap { display: flex; flex-direction: column; gap: 2px; }
+  .location {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500; color: var(--muted);
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .location-dot {
+    width: 6px; height: 6px; background: var(--accent);
+    border-radius: 50%; flex-shrink: 0;
+  }
+  .last-updated { font-size: 10px; color: var(--muted); opacity: 0.7; padding-left: 12px; }
+  .header-btns { display: flex; gap: 8px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--card); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg); transition: background 0.15s; -webkit-tap-highlight-color: transparent;
+  }
+  .icon-btn:active { background: var(--border); }
+  .icon-btn.spinning svg { animation: spin 1s linear infinite; }
+
+  /* Offline banner */
+  .offline-banner {
+    background: #FFF3CD; color: #856404;
+    font-size: 12px; text-align: center; padding: 7px;
+    border-radius: 10px; margin-top: 8px;
+    display: none;
+  }
+  .offline-banner.show { display: block; }
+
+  /* Install banner */
+  .install-banner {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .install-banner.show { display: flex; }
+  .install-btn {
+    margin-left: auto; flex-shrink: 0;
+    background: var(--accent); color: white;
+    border: none; border-radius: 8px; padding: 6px 12px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .install-dismiss {
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 18px; line-height: 1;
+    flex-shrink: 0;
+  }
+
+  /* Loading */
+  .loading-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 80px 0; gap: 16px;
+  }
+  .loader {
+    width: 28px; height: 28px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  .loading-text { font-size: 14px; color: var(--muted); font-style: italic; font-family: 'DM Serif Display', serif; }
+
+  /* Error */
+  .error-state {
+    background: var(--card); border-radius: 18px; padding: 24px;
+    margin-top: 20px; font-size: 14px; color: var(--muted); text-align: center; line-height: 1.6;
+  }
+
+  /* Hero */
+  .hero { padding: 24px 0 16px; position: relative; }
+  .condition-label {
+    font-family: 'DM Serif Display', serif; font-style: italic;
+    font-size: 16px; color: var(--muted); margin-bottom: 4px;
+  }
+  .temp-display {
+    font-family: 'DM Serif Display', serif; font-size: 96px;
+    line-height: 1; letter-spacing: -4px; color: var(--fg);
+  }
+  .temp-display sup { font-size: 28px; letter-spacing: 0; vertical-align: super; margin-left: 4px; color: var(--muted); }
+  .feels-like { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .weather-icon-bg {
+    position: absolute; right: -4px; top: 20px; font-size: 80px;
+    opacity: 0.1; pointer-events: none; user-select: none; filter: grayscale(1);
+  }
+
+  /* Stats */
+  .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 18px; }
+  .stat-card { background: var(--card); border-radius: 16px; padding: 14px 12px; }
+  .stat-label { font-size: 10px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
+  .stat-value { font-size: 19px; font-family: 'DM Serif Display', serif; color: var(--fg); line-height: 1; }
+  .stat-unit { font-size: 11px; color: var(--muted); font-family: 'DM Sans', sans-serif; }
+
+  /* Section label */
+  .section-label { font-size: 10px; font-weight: 500; color: var(--muted); letter-spacing: 0.09em; text-transform: uppercase; margin-bottom: 9px; }
+
+  /* Hourly */
+  .hourly-scroll {
+    display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+    margin-bottom: 18px; margin-left: -20px; margin-right: -20px; padding: 0 20px 4px;
+  }
+  .hourly-scroll::-webkit-scrollbar { display: none; }
+  .hour-card {
+    background: var(--card); border-radius: 14px; padding: 12px 10px;
+    min-width: 60px; text-align: center; flex-shrink: 0; transition: background 0.2s, color 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hour-card.active { background: var(--fg); color: var(--white); }
+  .hour-time { font-size: 10px; font-weight: 500; color: var(--muted); margin-bottom: 7px; }
+  .hour-card.active .hour-time { color: rgba(255,255,255,0.55); }
+  .hour-icon { font-size: 17px; margin-bottom: 6px; }
+  .hour-temp { font-size: 14px; font-family: 'DM Serif Display', serif; }
+  .hour-rain { font-size: 9px; color: var(--accent); margin-top: 3px; font-weight: 500; }
+  .hour-card.active .hour-rain { color: rgba(140,170,255,0.9); }
+
+  /* 7-day */
+  .week-card { background: var(--card); border-radius: 18px; overflow: hidden; margin-bottom: 18px; }
+  .day-row { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .day-row:last-child { border-bottom: none; }
+  .day-name { font-size: 13px; width: 46px; flex-shrink: 0; }
+  .day-icon { font-size: 16px; width: 26px; text-align: center; }
+  .temp-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 2px; margin: 0 10px; position: relative; }
+  .temp-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; position: absolute; opacity: 0.7; }
+  .day-range { display: flex; gap: 6px; font-family: 'DM Serif Display', serif; font-size: 14px; min-width: 50px; justify-content: flex-end; }
+  .day-low { color: var(--muted); }
+
+  /* Bottom grid */
+  .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+  .info-card { background: var(--card); border-radius: 16px; padding: 15px 14px; }
+  .info-label { font-size: 10px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 7px; }
+  .info-value { font-family: 'DM Serif Display', serif; font-size: 24px; line-height: 1; margin-bottom: 3px; }
+  .info-sub { font-size: 11px; color: var(--muted); }
+
+  /* Rain chart */
+  .rain-card { background: var(--card); border-radius: 18px; padding: 14px 14px 12px; margin-bottom: 18px; }
+  .rain-bars { display: flex; gap: 5px; align-items: flex-end; height: 52px; margin-top: 10px; }
+  .rain-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+  .rain-bar { width: 100%; background: var(--accent); border-radius: 3px 3px 2px 2px; opacity: 0.65; min-height: 3px; }
+  .rain-hour { font-size: 9px; color: var(--muted); font-weight: 500; }
+
+  /* Animations */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .anim { animation: fadeUp 0.45s ease both; }
+  .a1 { animation-delay: 0.04s; } .a2 { animation-delay: 0.10s; }
+  .a3 { animation-delay: 0.16s; } .a4 { animation-delay: 0.22s; }
+  .a5 { animation-delay: 0.28s; } .a6 { animation-delay: 0.34s; }
+</style>
+</head>
+<body>
+
+<div class="status-bar">
+  <span id="clockEl">--:--</span>
+  <span>●●●</span>
+</div>
+
+<!-- Search overlay -->
+<div class="search-overlay" id="searchOverlay">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div class="search-bar" style="flex:1">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9A9892" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="searchInput" type="text" placeholder="Zoek stad…" autocomplete="off" />
+    </div>
+    <button class="search-close" id="searchClose">Annuleer</button>
+  </div>
+  <div class="search-results" id="searchResults">
+    <div class="search-hint">Typ een stadsnaam</div>
+  </div>
+</div>
+
+<div class="scroll-content" id="mainContent">
+  <div class="header">
+    <div class="location-wrap">
+      <div class="location">
+        <div class="location-dot"></div>
+        <span id="locationName">Amsterdam</span>
+      </div>
+      <div class="last-updated" id="lastUpdated"></div>
+    </div>
+    <div class="header-btns">
+      <button class="icon-btn" id="refreshBtn" title="Vernieuwen">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="icon-btn" id="searchBtn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="offline-banner" id="offlineBanner">📡 Geen verbinding — laatste bekende data wordt getoond</div>
+
+  <div class="install-banner" id="installBanner">
+    <span>📲</span>
+    <span>Installeer de app op je homescreen</span>
+    <button class="install-btn" id="installBtn">Installeer</button>
+    <button class="install-dismiss" id="installDismiss">×</button>
+  </div>
+
+  <div id="weatherContent"></div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let currentCity = { name: 'Amsterdam', lat: 52.3676, lon: 4.9041, country: 'NL' };
+let deferredPrompt = null;
+
+// ─── Service Worker ──────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// ─── Install prompt ───────────────────────────────────────────────────────────
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('installBanner').classList.add('show');
+});
+
+document.getElementById('installBtn').onclick = async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  document.getElementById('installBanner').classList.remove('show');
+};
+
+document.getElementById('installDismiss').onclick = () => {
+  document.getElementById('installBanner').classList.remove('show');
+};
+
+// ─── Offline detection ────────────────────────────────────────────────────────
+function updateOnlineStatus() {
+  document.getElementById('offlineBanner').classList.toggle('show', !navigator.onLine);
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
+// ─── Clock ────────────────────────────────────────────────────────────────────
+function updateClock() {
+  const n = new Date();
+  document.getElementById('clockEl').textContent =
+    pad(n.getHours()) + ':' + pad(n.getMinutes());
+}
+updateClock();
+setInterval(updateClock, 10000);
+
+// ─── WMO codes ────────────────────────────────────────────────────────────────
+const WMO = {
+  0:  { label:'Helder',               icon:'☀️' },
+  1:  { label:'Overwegend helder',    icon:'🌤️' },
+  2:  { label:'Gedeeltelijk bewolkt', icon:'⛅' },
+  3:  { label:'Bewolkt',              icon:'☁️' },
+  45: { label:'Mist',                 icon:'🌫️' },
+  48: { label:'IJsmist',              icon:'🌫️' },
+  51: { label:'Lichte motregen',      icon:'🌦️' },
+  53: { label:'Motregen',             icon:'🌦️' },
+  55: { label:'Zware motregen',       icon:'🌧️' },
+  61: { label:'Lichte regen',         icon:'🌦️' },
+  63: { label:'Regen',                icon:'🌧️' },
+  65: { label:'Zware regen',          icon:'🌧️' },
+  71: { label:'Lichte sneeuw',        icon:'🌨️' },
+  73: { label:'Sneeuw',               icon:'❄️' },
+  75: { label:'Zware sneeuw',         icon:'❄️' },
+  80: { label:'Lichte buien',         icon:'🌦️' },
+  81: { label:'Buien',                icon:'🌧️' },
+  82: { label:'Zware buien',          icon:'⛈️' },
+  85: { label:'Sneeuwbuien',          icon:'🌨️' },
+  95: { label:'Onweer',               icon:'⛈️' },
+  96: { label:'Onweer met hagel',     icon:'⛈️' },
+  99: { label:'Zwaar onweer',         icon:'🌩️' },
+};
+function wmo(c) { return WMO[c] || WMO[Math.floor(c/10)*10] || { label:'Onbekend', icon:'🌡️' }; }
+
+const DAYS = ['zo','ma','di','wo','do','vr','za'];
+function pad(n) { return n.toString().padStart(2,'0'); }
+function fmtTime(iso) { if(!iso) return '--'; const d=new Date(iso); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+
+// ─── Fetch weather ────────────────────────────────────────────────────────────
+async function fetchWeather(lat, lon) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m,precipitation` +
+    `&hourly=temperature_2m,weather_code,precipitation_probability,precipitation` +
+    `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,visibility_mean,precipitation_sum` +
+    `&wind_speed_unit=kmh&timezone=auto&forecast_days=7`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('API error');
+  return res.json();
+}
+
+// ─── Geocode ─────────────────────────────────────────────────────────────────
+async function geocode(q) {
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=nl&format=json`);
+  const data = await res.json();
+  return data.results || [];
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function renderWeather(data) {
+  const c = data.current, h = data.hourly, d = data.daily;
+  const now = new Date();
+  const nowIdx = Math.max(0, h.time.findIndex(t => new Date(t).getHours() === now.getHours()));
+
+  // Hourly
+  let hourlyHTML = '';
+  for (let i = nowIdx; i < Math.min(nowIdx+8, h.time.length); i++) {
+    const t = new Date(h.time[i]);
+    const label = i===nowIdx ? 'Nu' : pad(t.getHours())+':00';
+    const w = wmo(h.weather_code[i]);
+    const prob = h.precipitation_probability[i];
+    hourlyHTML += `
+      <div class="hour-card ${i===nowIdx?'active':''}">
+        <div class="hour-time">${label}</div>
+        <div class="hour-icon">${w.icon}</div>
+        <div class="hour-temp">${Math.round(h.temperature_2m[i])}°</div>
+        ${prob>10?`<div class="hour-rain">${prob}%</div>`:''}
+      </div>`;
+  }
+
+  // 7-day
+  const tMin = Math.min(...d.temperature_2m_min);
+  const tMax = Math.max(...d.temperature_2m_max);
+  const tRange = tMax - tMin || 1;
+  let daysHTML = '';
+  for (let i=0; i<7; i++) {
+    const date = new Date(d.time[i]);
+    const dayLabel = i===0 ? 'Vand.' : DAYS[date.getDay()];
+    const w = wmo(d.weather_code[i]);
+    const lo = Math.round(d.temperature_2m_min[i]);
+    const hi = Math.round(d.temperature_2m_max[i]);
+    const left = ((lo-tMin)/tRange*70).toFixed(1);
+    const width = (((hi-lo)/tRange)*70+10).toFixed(1);
+    daysHTML += `
+      <div class="day-row">
+        <div class="day-name">${dayLabel}</div>
+        <div class="day-icon">${w.icon}</div>
+        <div class="temp-bar-bg"><div class="temp-bar-fill" style="left:${left}%;width:${width}%"></div></div>
+        <div class="day-range"><span class="day-low">${lo}°</span><span>${hi}°</span></div>
+      </div>`;
+  }
+
+  // Rain bars
+  const maxP = Math.max(...h.precipitation.slice(nowIdx, nowIdx+10), 0.1);
+  let rainHTML = '';
+  for (let i=nowIdx; i<Math.min(nowIdx+10, h.time.length); i++) {
+    const t = new Date(h.time[i]);
+    const pct = Math.max(4, (h.precipitation[i]/maxP)*100);
+    rainHTML += `<div class="rain-bar-wrap"><div class="rain-bar" style="height:${pct}%"></div><div class="rain-hour">${pad(t.getHours())}u</div></div>`;
+  }
+
+  const curW = wmo(c.weather_code);
+  const uv = Math.round(d.uv_index_max[0]);
+  const uvLabel = uv<=2?'Laag':uv<=5?'Matig':uv<=7?'Hoog':'Zeer hoog';
+  const vis = d.visibility_mean ? Math.round(d.visibility_mean[0]/1000) : '–';
+  const precip = (d.precipitation_sum[0]||0).toFixed(1);
+
+  document.getElementById('weatherContent').innerHTML = `
+    <div class="hero anim a1">
+      <div class="condition-label">${curW.label}</div>
+      <div class="temp-display">${Math.round(c.temperature_2m)}<sup>°</sup></div>
+      <div class="feels-like">Voelt als ${Math.round(c.apparent_temperature)}° · Hoog ${Math.round(d.temperature_2m_max[0])}° Laag ${Math.round(d.temperature_2m_min[0])}°</div>
+      <div class="weather-icon-bg">${curW.icon}</div>
+    </div>
+    <div class="stats-row anim a2">
+      <div class="stat-card"><div class="stat-label">Wind</div><div class="stat-value">${Math.round(c.wind_speed_10m)}<span class="stat-unit"> km/u</span></div></div>
+      <div class="stat-card"><div class="stat-label">Vochtig</div><div class="stat-value">${c.relative_humidity_2m}<span class="stat-unit">%</span></div></div>
+      <div class="stat-card"><div class="stat-label">Neerslag</div><div class="stat-value">${precip}<span class="stat-unit"> mm</span></div></div>
+    </div>
+    <div class="section-label anim a3">Per uur</div>
+    <div class="hourly-scroll anim a3">${hourlyHTML}</div>
+    <div class="section-label anim a4">7 dagen</div>
+    <div class="week-card anim a4">${daysHTML}</div>
+    <div class="bottom-grid anim a5">
+      <div class="info-card"><div class="info-label">Zonsopgang</div><div class="info-value">${fmtTime(d.sunrise[0])}</div><div class="info-sub">Zonsondergang ${fmtTime(d.sunset[0])}</div></div>
+      <div class="info-card"><div class="info-label">UV-index</div><div class="info-value">${uv}</div><div class="info-sub">${uvLabel}</div></div>
+      <div class="info-card"><div class="info-label">Zichtbaarheid</div><div class="info-value">${vis} km</div><div class="info-sub">Vandaag gemiddeld</div></div>
+      <div class="info-card"><div class="info-label">Luchtvochtigheid</div><div class="info-value">${c.relative_humidity_2m}%</div><div class="info-sub">Relatief</div></div>
+    </div>
+    <div class="section-label anim a6">Neerslag vandaag</div>
+    <div class="rain-card anim a6"><div class="rain-bars">${rainHTML}</div></div>`;
+
+  document.getElementById('lastUpdated').textContent =
+    'Bijgewerkt om ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+}
+
+// ─── Load city ────────────────────────────────────────────────────────────────
+async function loadCity(city) {
+  currentCity = city;
+  document.getElementById('locationName').textContent =
+    city.name + (city.country ? ', ' + city.country : '');
+  document.getElementById('weatherContent').innerHTML = `
+    <div class="loading-state">
+      <div class="loader"></div>
+      <div class="loading-text">Data ophalen…</div>
+    </div>`;
+  document.getElementById('refreshBtn').classList.add('spinning');
+  try {
+    const data = await fetchWeather(city.lat, city.lon);
+    renderWeather(data);
+  } catch(e) {
+    document.getElementById('weatherContent').innerHTML = `
+      <div class="error-state">Kon geen weerdata ophalen.<br>Controleer je verbinding en probeer opnieuw.</div>`;
+  }
+  document.getElementById('refreshBtn').classList.remove('spinning');
+}
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+let searchTimer;
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+const searchOverlay = document.getElementById('searchOverlay');
+
+document.getElementById('searchBtn').onclick = () => { searchOverlay.classList.add('open'); searchInput.focus(); };
+document.getElementById('searchClose').onclick = () => { searchOverlay.classList.remove('open'); searchInput.value=''; searchResults.innerHTML='<div class="search-hint">Typ een stadsnaam</div>'; };
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { searchResults.innerHTML='<div class="search-hint">Typ een stadsnaam</div>'; return; }
+  searchResults.innerHTML = '<div class="search-hint">Zoeken…</div>';
+  searchTimer = setTimeout(async () => {
+    try {
+      const results = await geocode(q);
+      if (!results.length) { searchResults.innerHTML='<div class="search-hint">Geen resultaten</div>'; return; }
+      searchResults.innerHTML = results.map(r => `
+        <div class="search-result-item" data-lat="${r.latitude}" data-lon="${r.longitude}" data-name="${r.name}" data-country="${r.country_code||''}">
+          <div class="search-result-city">${r.name}</div>
+          <div class="search-result-country">${[r.admin1,r.country].filter(Boolean).join(', ')}</div>
+        </div>`).join('');
+      searchResults.querySelectorAll('.search-result-item').forEach(el => {
+        el.onclick = () => {
+          loadCity({ name: el.dataset.name, lat: parseFloat(el.dataset.lat), lon: parseFloat(el.dataset.lon), country: el.dataset.country });
+          searchOverlay.classList.remove('open');
+          searchInput.value='';
+          searchResults.innerHTML='<div class="search-hint">Typ een stadsnaam</div>';
+        };
+      });
+    } catch { searchResults.innerHTML='<div class="search-hint">Zoekopdracht mislukt</div>'; }
+  }, 400);
+});
+
+document.getElementById('refreshBtn').onclick = () => loadCity(currentCity);
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+loadCity(currentCity);
+</script>
+</body>
+</html>
